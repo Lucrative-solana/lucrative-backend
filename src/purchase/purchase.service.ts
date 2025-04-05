@@ -24,8 +24,15 @@ export class PurchaseService {
   }
 
   async process(buyer: string, seller: string, amountInSol: number, itemId: string, itemName: string, itemDescription: string) {
-  
-    const buyerKey = new PublicKey(buyer);
+    console.log('recevied purchase request service:', {
+      buyer,
+      seller,
+      amountInSol,
+      itemId,
+      itemName,
+      itemDescription,
+    })
+    const buyerKey = new PublicKey(buyer);  
     const sellerKey = new PublicKey(seller);
 
     const fullLamports = amountInSol * 1e9;
