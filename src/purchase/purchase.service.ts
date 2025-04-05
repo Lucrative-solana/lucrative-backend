@@ -76,6 +76,7 @@ export class PurchaseService {
     // const payoutLamports = fullLamports - liquidityLamports;
 
     // 판매자에게 지불할 금액을 송금합니다.(Direct Payout)
+    console.log('Payout Amount:', payoutLamports);
     const transferIx = SystemProgram.transfer({
       fromPubkey: this.payer.publicKey,
       toPubkey: sellerWalletAddress,
@@ -98,54 +99,22 @@ export class PurchaseService {
     });
     
     // 판매자에게 유동성을 추가합니다.(할인된 금액만큼 유동성 추가)
-    const sellerTokenMint = new PublicKey((await this.sellerService.getSellerTokenMint(seller)));
+    const sellerTokenMint = (await this.sellerService.getSellerTokenMint(seller));
+    console.log('Seller token mint:', sellerTokenMint);
+    console.log('Liquidity amount:', liquidityLamports);
 
-    // const ctx = WhirlpoolContext.withProvider(this.connection, this.payer, ORCA_WHIRLPOOL_PROGRAM_ID);
-    // const client = buildWhirlpoolClient(ctx);
+    // Backend 지갑 ATA에 토큰을 민팅합니다.
+    await this.sellerService.mintTokenToBackendAta(sellerTokenMint, liquidityLamports);
+    console.log('Token minted to backend ATA:', {
+      mint: sellerTokenMint,
+      amount: liquidityLamports,
+    });
 
-    // const whirlpoolPda = PDAUtil.getWhirlpool(
-    //   ORCA_WHIRLPOOL_PROGRAM_ID,
-    //   ctx.config.rewardEmissionsSuperAuthority,
-    //   sellerTokenMint,
-    //   DEVNET_USDC,
-    //   64
-    // );
+    // liquidityLamports와 민팅된 토큰을 유동성 풀에 추가
+    // 1. 유동성 풀이 없으면 생성
+    // 2. 유동성 풀에 유동성 추가
+    // 3. 유동성 풀에 추가된 토큰을 판매자에게 전송
 
-    // let whirlpool;
-    // try {
-    //   whirlpool = await client.getPool(whirlpoolPda.publicKey);
-    // } catch (e) {
-    //   whirlpool = await client.initPool(
-    //     sellerTokenMint,
-    //     DEVNET_USDC,
-    //     6,
-    //     64
-    //   );
-    // }
-
-    // const payoutTx = new Transaction().add(
-    //   SystemProgram.transfer({
-    //     fromPubkey: this.payer.publicKey,
-    //     toPubkey: sellerKey,
-    //     lamports: payoutLamports,
-    //   })
-    // );
-    // payoutTx.feePayer = this.payer.publicKey;
-    // payoutTx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
-    // const payoutSig = await this.connection.sendTransaction(payoutTx, [this.payer]);
-
-    // const position = await whirlpool.openPositionWithLiquidity({
-    //   tickLowerIndex: -44320,
-    //   tickUpperIndex: 44320,
-    //   liquidityAmount: new Decimal(1_000),
-    //   tokenMaxA: new Decimal(liquidityLamports),
-    //   tokenMaxB: new Decimal(1000),
-    //   owner: sellerKey,
-    // });
-    // const liquiditySig = await position.buildAndExecute();
-
-    // const liquidityTx = new Transaction().add(
-    //   SystemProgram.transfer({
     await this.prisma.purchase.create({
       data: {
         buyer,

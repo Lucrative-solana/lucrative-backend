@@ -5,11 +5,12 @@ import bs58 from 'bs58';
 import * as nacl from 'tweetnacl';
 
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
-import { mplToolbox } from '@metaplex-foundation/mpl-toolbox';
+import { findAssociatedTokenPda, mplToolbox } from '@metaplex-foundation/mpl-toolbox';
 import { generateSigner, percentAmount, signerIdentity } from '@metaplex-foundation/umi';
 import { keypairIdentity } from '@metaplex-foundation/umi';
-import { PublicKey } from '@solana/web3.js';
-import { createAndMint, TokenStandard } from '@metaplex-foundation/mpl-token-metadata';
+import { PublicKey as Web3PublicKey } from '@solana/web3.js';
+import { publicKey as umiPublicKey } from '@metaplex-foundation/umi';
+import { mintV1, createAndMint, TokenStandard } from '@metaplex-foundation/mpl-token-metadata';
 
 @Injectable()
 export class SellerService {
@@ -36,7 +37,7 @@ export class SellerService {
   }
 
   verifySignature(wallet: string, message: string, signature: string): boolean {
-    const publicKey = new PublicKey(wallet);
+    const publicKey = new Web3PublicKey(wallet);
     const messageBytes = new TextEncoder().encode(message);
     const signatureBytes = bs58.decode(signature);
     return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
@@ -111,6 +112,28 @@ export class SellerService {
 
     return { tokenMint: tokenMint };
   }
+
+  async mintTokenToBackendAta(mintAddress: string, amount: number) {
+    
+    const mint = umiPublicKey(mintAddress);
+    const decimals = 9;
+    const realAmount = amount * Math.pow(10, decimals);
+
+    const backendTokenOwner = this.umi.identity.publicKey;
+    const backendAta = await findAssociatedTokenPda(this.umi, {
+      mint: mint,
+      owner: backendTokenOwner,
+    });
+
+    const result = await mintV1(this.umi, {
+      mint,
+      authority: this.umi.identity, // mint authority = backend wallet
+      amount: realAmount,
+      tokenOwner: backendTokenOwner,
+      tokenStandard: TokenStandard.Fungible,
+  }).sendAndConfirm(this.umi);
+    console.log('Mint result:', result);
+}
 
   async getSellerTokenMint(wallet: string): Promise<string> {
     const seller = await this.prisma.seller.findUnique({
