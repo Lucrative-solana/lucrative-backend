@@ -1,13 +1,46 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { PublicKey, Connection, Keypair, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { ORCA_WHIRLPOOL_PROGRAM_ID, WhirlpoolContext, buildWhirlpoolClient, PDAUtil } from '@orca-so/whirlpools-sdk';
-import Decimal from 'decimal.js';
+import { 
+  PublicKey, 
+  Connection, 
+  Keypair, 
+  SystemProgram, 
+  Transaction, 
+  sendAndConfirmTransaction,
+  TransactionInstruction,
+  AccountMeta
+} from '@solana/web3.js';
 import { SellerService } from 'src/seller/seller.service';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { create } from 'domain';
-
-
-const DEVNET_USDC = new PublicKey('7XSzTBNpGUYPoxPZC8rKTtYiyQicKcRJ9iMw52Rqj8kP');
+import {
+  setPayerFromBytes,
+  setRpc,
+  createSplashPoolInstructions,
+  openFullRangePositionInstructions,
+  setWhirlpoolsConfig,
+  setDefaultFunder,
+  fetchSplashPool,
+  createSplashPool,
+} from '@orca-so/whirlpools';
+import {
+  createSolanaRpc,
+  address,
+  pipe,
+  devnet,
+  createKeyPairSignerFromBytes,
+  createTransactionMessage,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  appendTransactionMessageInstructions,
+  prependTransactionMessageInstructions,
+  signTransactionMessageWithSigners,
+  getComputeUnitEstimateForTransactionMessageFactory,
+  getBase64EncodedWireTransaction,
+  setTransactionMessageFeePayerSigner
+} from '@solana/kit';
+import {
+  getSetComputeUnitLimitInstruction,
+  getSetComputeUnitPriceInstruction
+} from '@solana-program/compute-budget';
 
 @Injectable()
 export class PurchaseService {
@@ -17,12 +50,20 @@ export class PurchaseService {
     private readonly sellerService: SellerService,
     private readonly prisma: PrismaService,
   ) {
+    this.initialize();
+  }
+
+  private async initialize() {
     const secretKey = JSON.parse(process.env.SOLANA_PAYER_PRIVATE_KEY);
     if (!secretKey) {
       throw new InternalServerErrorException('Missing environment variable: SOLANA_PAYER_PRIVATE_KEY');
     }
     const payer = Keypair.fromSecretKey(new Uint8Array(secretKey));
     this.payer = payer;
+    await setPayerFromBytes(this.payer.secretKey);
+    await setRpc(this.connection.rpcEndpoint);
+    const wallet = await createKeyPairSignerFromBytes(this.payer.secretKey);
+    await setDefaultFunder(wallet)
   }
 
   getReceiverAddress() {
@@ -110,9 +151,129 @@ export class PurchaseService {
       amount: liquidityLamports,
     });
 
-    // liquidityLamports와 민팅된 토큰을 유동성 풀에 추가
-    // 1. 유동성 풀이 없으면 생성
+    // 유동성 풀 생성 시작.
+    await setWhirlpoolsConfig('solanaDevnet');
+    const devnetRpc = createSolanaRpc(devnet('https://api.devnet.solana.com'));
+    const rpc = devnetRpc; // Define rpc as the Solana RPC client
+    const wallet = await createKeyPairSignerFromBytes(this.payer.secretKey);
+
+    const tokenMintOne = address("So11111111111111111111111111111111111111112"); // SOL
+    const tokenMintTwo = address(sellerTokenMint);
+    // const tokenMintTwo = address("BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k"); // devUSDC
+    // const tokenMintTwo = address('43hotxWdt5efQi7aJwRVpexZBcHMKNaNn9Z4dG7QxJeT'); // token without pool creation
+    const initialPrice = 0.00000001;
+
+    // 기존 유동성 풀 정보 확인
+    console.log('Fetching pool info...');
+    const poolInfo = await fetchSplashPool(
+      devnetRpc,
+      tokenMintOne,
+      tokenMintTwo
+    );
+
+    if (poolInfo.initialized) {
+      console.log('Pool is initialized:', poolInfo);
+    } else {
+      console.log('Pool is not initialized:', poolInfo);
+      // 유동성 풀이 없을 경우 새로 생성
+
+      const { poolAddress, instructions, initializationCost } = await createSplashPoolInstructions(
+        devnetRpc,
+        tokenMintOne,
+        tokenMintTwo,
+        initialPrice,
+        wallet
+      );
+      
+      console.log(`Pool Address: ${poolAddress}`);
+      console.log(`Initialization Cost: ${initializationCost} lamports`);
+
+      // Create Transaction Message From Instructions
+      const latestBlockHash = await rpc.getLatestBlockhash().send();
+      const transactionMessage = await pipe(
+        createTransactionMessage({ version: 0}),
+        tx => setTransactionMessageFeePayer(wallet.address, tx),
+        tx => setTransactionMessageLifetimeUsingBlockhash(latestBlockHash.value, tx),
+        tx => appendTransactionMessageInstructions(instructions, tx),
+      );
+      console.log('Transaction message:', transactionMessage);
+
+      // Estimating Compute Unit Limit and Prioritization Fee
+      const getComputeUnitEstimateForTransactionMessage =
+      getComputeUnitEstimateForTransactionMessageFactory({
+        rpc
+      });
+      const computeUnitEstimate = await getComputeUnitEstimateForTransactionMessage(transactionMessage) + 100_000;
+      const medianPrioritizationFee = await rpc.getRecentPrioritizationFees()
+        .send()
+        .then(fees =>
+          fees
+            .map(fee => Number(fee.prioritizationFee))
+            .sort((a, b) => a - b)
+            [Math.floor(fees.length / 2)]
+        );
+      const transactionMessageWithComputeUnitInstructions = await prependTransactionMessageInstructions([
+        getSetComputeUnitLimitInstruction({ units: computeUnitEstimate }),
+        getSetComputeUnitPriceInstruction({ microLamports: medianPrioritizationFee })
+      ], transactionMessage);
+
+      // Sign and Submit Transaction
+      const signedTransaction = await signTransactionMessageWithSigners(transactionMessageWithComputeUnitInstructions)
+      const base64EncodedWireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+
+      const timeoutMs = 90000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < timeoutMs) {
+        const transactionStartTime = Date.now();
+
+        const signature = await rpc.sendTransaction(base64EncodedWireTransaction, {
+          maxRetries: 0n,
+          skipPreflight: true,
+          encoding: 'base64'
+        }).send();
+
+        const statuses = await rpc.getSignatureStatuses([signature]).send();
+        if (statuses.value[0]) {
+          if (!statuses.value[0].err) {
+            console.log(`Transaction confirmed: ${signature}`);
+            break;
+          } else {
+            console.error(`Transaction failed: ${statuses.value[0].err.toString()}`);
+            break;
+          }
+        }
+
+        const elapsedTime = Date.now() - transactionStartTime;
+        const remainingTime = Math.max(0, 1000 - elapsedTime);
+        if (remainingTime > 0) {
+          await new Promise(resolve => setTimeout(resolve, remainingTime));
+        }
+      }
+
+    };
+
     // 2. 유동성 풀에 유동성 추가
+    console.log('Adding liquidity...');
+    const whirlpoolAddress = address(poolInfo.address);
+
+    const param = { 
+      tokenA: BigInt(liquidityLamports) ** 9n, // 9 decimal
+      tokenB: BigInt(liquidityLamports),
+    };
+
+    const { quote, instructions, initializationCost, positionMint } = await openFullRangePositionInstructions(
+      devnetRpc,
+      whirlpoolAddress,
+      param,
+      100,
+      wallet
+    );
+
+    console.log(`Quote token max B: ${quote.tokenMaxB}`);
+    console.log(`Initialization cost: ${initializationCost}`);
+    console.log(`Position mint: ${positionMint}`);
+
     // 3. 유동성 풀에 추가된 토큰을 판매자에게 전송
 
     await this.prisma.purchase.create({
