@@ -10,7 +10,7 @@ export class SellerController {
     if (!wallet) throw new BadRequestException('wallet is required');
     return { message: this.sellerService.generateLoginMessage(wallet) };
   }
-  @Post('login')
+  @Post('token/address')
   async login(@Body() body: { wallet: string; message: string; signature: string }) {
     const { wallet, message, signature } = body;
     if (!wallet || !message || !signature) {
@@ -22,6 +22,6 @@ export class SellerController {
       throw new BadRequestException('Invalid signature');
     }
   
-      return this.sellerService.loginSeller(wallet);
+      return this.sellerService.getTokenAddress(wallet);
     }
   }

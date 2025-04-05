@@ -1,27 +1,32 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
-import {
-  createMint,
-  getOrCreateAssociatedTokenAccount,
-  mintTo,
-} from '@solana/spl-token';
 import bs58 from 'bs58';
 import * as nacl from 'tweetnacl';
 
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
+import { mplToolbox } from '@metaplex-foundation/mpl-toolbox';
+import { generateSigner, percentAmount, signerIdentity } from '@metaplex-foundation/umi';
+import { keypairIdentity } from '@metaplex-foundation/umi';
+import { PublicKey } from '@solana/web3.js';
+import { createAndMint, TokenStandard } from '@metaplex-foundation/mpl-token-metadata';
+
 @Injectable()
 export class SellerService {
-  private connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-  private payer: Keypair;
+
+  private readonly umi;
 
   constructor(private readonly prisma: PrismaService) {
-    const secretKey = process.env.SOLANA_PAYER_PRIVATE_KEY;
+    const secretKey = JSON.parse(process.env.SOLANA_PAYER_PRIVATE_KEY);
     if (!secretKey) {
-      throw new InternalServerErrorException('Missing environment variable: SOLANA_PAYER_SECRET_KEY');
+      throw new InternalServerErrorException('Missing environment variable: SOLANA_PAYER_PRIVATE_KEY');
     }
-    this.payer = Keypair.fromSecretKey(
-      Uint8Array.from(JSON.parse(secretKey))
-    );
+
+    // Umi 초기화
+    this.umi = createUmi('https://api.devnet.solana.com').use(mplToolbox());
+
+    // 기존 지갑 로드
+    const keypair = this.umi.eddsa.createKeypairFromSecretKey(new Uint8Array(secretKey));
+    this.umi.use(keypairIdentity(keypair));
   }
 
   generateLoginMessage(wallet: string) {
@@ -33,12 +38,10 @@ export class SellerService {
     const publicKey = new PublicKey(wallet);
     const messageBytes = new TextEncoder().encode(message);
     const signatureBytes = bs58.decode(signature);
-  
     return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
   }
 
-  async loginSeller(wallet: string) {
-    // DB에 이미 등록된 셀러인지 확인
+  async getTokenAddress(wallet: string) {
     const existingSeller = await this.prisma.seller.findUnique({
       where: { wallet },
     });
@@ -47,63 +50,39 @@ export class SellerService {
       return { tokenMint: existingSeller.tokenMint };
     }
     
-    // // 토큰 발행
-    // const sellerPubkey = new PublicKey(wallet);
+    const metadata = {
+      name: 'Your Token Name',
+      symbol: 'YTN',
+      uri: '', // 이미지가 없으므로 빈 문자열로 설정
+    }
 
-    // const mint = await createMint(
-    //   this.connection,
-    //   this.payer,
-    //   this.payer.publicKey,
-    //   sellerPubkey,
-    //   6
-    // );
+    const mint = generateSigner(this.umi);
 
-    // const sellerAta = await getOrCreateAssociatedTokenAccount(
-    //   this.connection,
-    //   this.payer,
-    //   mint,
-    //   sellerPubkey
-    // );
-    // // 900 tokens with 6 decimals (900 * 10^6)
-    // await mintTo(
-    //   this.connection,
-    //   this.payer,
-    //   mint,
-    //   sellerAta.address,
-    //   this.payer,
-    //   900_000_000
-    // );
+    await createAndMint(this.umi, {
+      mint,
+      authority: this.umi.identity,
+      name: metadata.name,
+      symbol: metadata.symbol,
+      uri: metadata.uri,
+      sellerFeeBasisPoints: percentAmount(0),
+      decimals: 9, //소수점 자리수 설정
+      amount: 1_000_000,
+      tokenOwner: this.umi.identity.publicKey,
+      tokenStandard: TokenStandard.Fungible,
+    }).sendAndConfirm(this.umi);
 
-    // const payerAta = await getOrCreateAssociatedTokenAccount(
-    //   this.connection,
-    //   this.payer,
-    //   mint,
-    //   this.payer.publicKey
-    // );
-    // await mintTo(
-    //   this.connection,
-    //   this.payer,
-    //   mint,
-    //   payerAta.address,
-    //   this.payer,
-    //   100_000_000
-    // );
+    const tokenMint = mint.publicKey.toString();
 
-    // // DB에 저장
-    // const newSeller = await this.prisma.seller.create({
-    //   data: {
-    //     wallet,
-    //     tokenMint: mint.toBase58(),
-    //   },
-    // });
+    console.log('Token Mint Address:', tokenMint);
 
-    // return { tokenMint: mint.toBase58() };
-    
-    // 👉 테스트용 임시 응답
-    return {
-      tokenMint: 'TEST_TOKEN_MINT',
-      message: '✅ registerSeller stubbed: Token mint skipped for testing.',
-    };
+    await this.prisma.seller.create({
+      data: {
+        wallet,
+        tokenMint: tokenMint,
+      },
+    });
+
+    return { tokenMint: tokenMint };
   }
 
   async getSellerTokenMint(wallet: string): Promise<string> {
