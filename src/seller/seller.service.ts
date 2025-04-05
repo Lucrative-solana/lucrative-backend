@@ -37,7 +37,7 @@ export class SellerService {
     return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
   }
 
-  async registerSeller(wallet: string) {
+  async loginSeller(wallet: string) {
     // DB에 이미 등록된 셀러인지 확인
     const existingSeller = await this.prisma.seller.findUnique({
       where: { wallet },
