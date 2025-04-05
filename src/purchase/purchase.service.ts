@@ -76,6 +76,8 @@ export class PurchaseService {
     // });
     // const liquiditySig = await position.buildAndExecute();
 
+    // const liquidityTx = new Transaction().add(
+    //   SystemProgram.transfer({
     // await this.prisma({
     //   data: {
     //     buyer,

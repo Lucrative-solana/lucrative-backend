@@ -16,6 +16,10 @@ export class PurchaseController {
     seller: string;
     amountInSol: number;
   }) {
+    console.log('Received purchase request:', body);
+    console.log('Buyer:', body.buyer);
+    console.log('Seller:', body.seller);
+    console.log('Amount in SOL:', body.amountInSol);
     return this.purchaseService.process(body.buyer, body.seller, body.amountInSol);
   }
 }
