@@ -18,3 +18,14 @@ model User {
   email String  @unique
   name  String?
 }
+
+model Purchase {
+  id              String   @id @default(uuid())
+  buyer           String
+  seller          String
+  amountInSol     Float
+  itemId          String
+  itemName        String
+  itemDescription String
+  createdAt       DateTime @default(now())
+}

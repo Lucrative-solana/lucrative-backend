@@ -4,6 +4,7 @@ import { ORCA_WHIRLPOOL_PROGRAM_ID, WhirlpoolContext, buildWhirlpoolClient, PDAU
 import Decimal from 'decimal.js';
 import { SellerService } from 'src/seller/seller.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { create } from 'domain';
 
 
 const DEVNET_USDC = new PublicKey('7XSzTBNpGUYPoxPZC8rKTtYiyQicKcRJ9iMw52Rqj8kP');
@@ -22,7 +23,8 @@ export class PurchaseService {
     return { receiver: this.payer.publicKey.toBase58() };
   }
 
-  async process(buyer: string, seller: string, amountInSol: number) {
+  async process(buyer: string, seller: string, amountInSol: number, itemId: string, itemName: string, itemDescription: string) {
+  
     const buyerKey = new PublicKey(buyer);
     const sellerKey = new PublicKey(seller);
 
@@ -30,7 +32,7 @@ export class PurchaseService {
     const liquidityLamports = fullLamports * 0.1;
     const payoutLamports = fullLamports - liquidityLamports;
 
-    const sellerTokenMint = await this.sellerService.getSellerTokenMint(seller);
+    // const sellerTokenMint = await this.sellerService.getSellerTokenMint(seller);
 
     // const ctx = WhirlpoolContext.withProvider(this.connection, this.payer, ORCA_WHIRLPOOL_PROGRAM_ID);
     // const client = buildWhirlpoolClient(ctx);
@@ -55,16 +57,16 @@ export class PurchaseService {
     //   );
     // }
 
-    const payoutTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: this.payer.publicKey,
-        toPubkey: sellerKey,
-        lamports: payoutLamports,
-      })
-    );
-    payoutTx.feePayer = this.payer.publicKey;
-    payoutTx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
-    const payoutSig = await this.connection.sendTransaction(payoutTx, [this.payer]);
+    // const payoutTx = new Transaction().add(
+    //   SystemProgram.transfer({
+    //     fromPubkey: this.payer.publicKey,
+    //     toPubkey: sellerKey,
+    //     lamports: payoutLamports,
+    //   })
+    // );
+    // payoutTx.feePayer = this.payer.publicKey;
+    // payoutTx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+    // const payoutSig = await this.connection.sendTransaction(payoutTx, [this.payer]);
 
     // const position = await whirlpool.openPositionWithLiquidity({
     //   tickLowerIndex: -44320,
@@ -78,24 +80,38 @@ export class PurchaseService {
 
     // const liquidityTx = new Transaction().add(
     //   SystemProgram.transfer({
-    // await this.prisma({
-    //   data: {
-    //     buyer,
-    //     seller,
-    //     amount: amountInSol,
-    //     sellerTokenMint,
-    //     payoutSig,
-    //     // liquiditySig,
-    //   },
-    // });
+    await this.prisma.purchase.create({
+      data: {
+        buyer,
+        seller,
+        amountInSol,
+        itemId,
+        itemName,
+        itemDescription,
+        //sellerTokenMint,
+        //payoutSig,
+        //liquiditySig,
+      },
+    });
+    console.log('Purchase recorded in database:', {
+      buyer,
+      seller,
+      amountInSol,
+      itemId,
+      itemName,
+      itemDescription,
+      // sellerTokenMint,
+      // payoutSig,
+      // liquiditySig,
+    });
 
     return {
       status: 'success',
       message: 'Purchase processed. Liquidity added.',
       usedForLiquidity: liquidityLamports / 1e9,
       sentToSeller: payoutLamports / 1e9,
-      sellerTokenMint,
-      payoutSig,
+      // sellerTokenMint,
+      // payoutSig,
       // liquiditySig,
     };
   }
