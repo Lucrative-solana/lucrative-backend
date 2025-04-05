@@ -38,26 +38,53 @@ export class PurchaseService {
       itemName,
       itemDescription,
     })
-    const buyerKey = new PublicKey(buyer);  
-    const sellerKey = new PublicKey(seller);
 
-    // 바로 보낼 금액을 lamports로 변환합니다.
+    // 1. DB에서 item 정보 가져오기
+    const item = await this.prisma.item.findUnique({
+      where: { id: itemId },
+    });
+    if (!item) {
+      throw new InternalServerErrorException('Item not found');
+    } else {
+      console.log('Item found:', item);
+    }
+
+
     // 1 SOL = 1_000_000_000 lamports
     // 1 SOL = 1e9 lamports
-    const fullLamports = amountInSol * 1e9;
-    const liquidityLamports = fullLamports * 0.1;
-    const payoutLamports = fullLamports - liquidityLamports;
 
-    // 판매자에게 지불할 금액을 송금합니다.(약 90% 송금)
+    const sellerWalletAddress = new PublicKey(item.walletAddress);
+    const itemPriceInSol = item.price;
+    const fullLamports = itemPriceInSol * 1e9;
+
+    // 할인율 기반 유동성 비율 계산
+    // 할인율이 0%면: 유동성 비율은 0%
+    // 할인율이 5%면: 유동성 비율은 7.5%
+    // 할인율이 10%면: 유동성 비율은 15%
+    // 할인율이 20%면: 유동성 비율은 30%
+    // 할인율이 25%여도 cap 때문에 유동성 비율은 30%
+    const liquidityRate = Math.min(item.discountRate * 1.5, 0.3);
+    console.log('Liquidity rate:', liquidityRate);
+
+    const liquidityLamports = Math.floor(fullLamports * liquidityRate);
+    const payoutLamports = Math.floor(fullLamports - liquidityLamports);
+
+    // const buyerWalletAddress = new PublicKey(buyer);  
+    // const sellerWalletAddress = new PublicKey(seller);
+    // const fullLamports = amountInSol * 1e9;
+    //const liquidityLamports = fullLamports * 0.1;
+    // const payoutLamports = fullLamports - liquidityLamports;
+
+    // 판매자에게 지불할 금액을 송금합니다.(Direct Payout)
     const transferIx = SystemProgram.transfer({
       fromPubkey: this.payer.publicKey,
-      toPubkey: sellerKey,
+      toPubkey: sellerWalletAddress,
       lamports: payoutLamports,
     });
 
     console.log('Transfer transaction ready:', {
       from: this.payer.publicKey.toBase58(),
-      to: sellerKey.toBase58(),
+      to: sellerWalletAddress.toBase58(),
       lamports: payoutLamports,
     });
     
@@ -66,11 +93,11 @@ export class PurchaseService {
     
     console.log('Transfer transaction sent:', {
       from: this.payer.publicKey.toBase58(),
-      to: sellerKey.toBase58(),
+      to: sellerWalletAddress.toBase58(),
       lamports: payoutLamports,
     });
     
-    // 판매자에게 유동성을 추가합니다.(약 10% 유동성 추가)
+    // 판매자에게 유동성을 추가합니다.(할인된 금액만큼 유동성 추가)
     const sellerTokenMint = new PublicKey((await this.sellerService.getSellerTokenMint(seller)));
 
     // const ctx = WhirlpoolContext.withProvider(this.connection, this.payer, ORCA_WHIRLPOOL_PROGRAM_ID);
