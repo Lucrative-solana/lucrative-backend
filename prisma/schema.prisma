@@ -35,3 +35,17 @@ model Seller {
   wallet     String  @unique
   tokenMint  String
 }
+
+model Item {
+  id              String   @id @default(uuid()) // itemId
+  name            String   // itemName
+  description     String   // itemDescription
+  price           Float    // price (SOL 등 단위 명확히 할 것)
+  walletAddress   String   // 판매자 지갑 주소
+  discountRate    Float    // 할인율 (예: 0.1은 10%)
+  quantity        Int      // 아이템 개수
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([name, walletAddress]) // 💡 같은 판매자가 같은 상품 이름 등록 못 함
+}

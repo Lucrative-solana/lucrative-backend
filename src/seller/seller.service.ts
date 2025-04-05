@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateItemDto } from './dto/create-item.dto';
 import bs58 from 'bs58';
 import * as nacl from 'tweetnacl';
 
@@ -39,6 +40,32 @@ export class SellerService {
     const messageBytes = new TextEncoder().encode(message);
     const signatureBytes = bs58.decode(signature);
     return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
+  }
+
+  async createItem(dto: CreateItemDto) {
+    const item = await this.prisma.item.create({
+      data: {
+        name: dto.name,
+        description: dto.description,
+        price: dto.price,
+        walletAddress: dto.walletAddress,
+        discountRate: dto.discountRate,
+        quantity: dto.quantity,
+      },
+    });
+    console.log('Item created:', item);
+    return item;
+  }
+
+  async findItemsByWallet(walletAddress: string) {
+    const items = await this.prisma.item.findMany({
+      where: {
+        walletAddress: walletAddress,
+      },
+    });
+  
+    console.log(`Items for wallet ${walletAddress}:`, items);
+    return items;
   }
 
   async getTokenAddress(wallet: string) {
