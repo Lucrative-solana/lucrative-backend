@@ -29,3 +29,9 @@ model Purchase {
   itemDescription String
   createdAt       DateTime @default(now())
 }
+
+model Seller {
+  id         Int     @id @default(autoincrement())
+  wallet     String  @unique
+  tokenMint  String
+}

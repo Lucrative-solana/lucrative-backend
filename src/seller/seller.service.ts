@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import {
   createMint,
@@ -13,7 +14,7 @@ export class SellerService {
   private connection = new Connection('https://api.devnet.solana.com', 'confirmed');
   private payer = Keypair.generate();
 
-  private sellerDB = new Map<string, string>(); // sellerWallet → tokenMint
+  constructor(private readonly prisma: PrismaService) {}
 
   generateLoginMessage(wallet: string) {
     const timestamp = Date.now();
@@ -29,10 +30,16 @@ export class SellerService {
   }
 
   async handleLogin(wallet: string) {
-    if (this.sellerDB.has(wallet)) {
-      return { tokenMint: this.sellerDB.get(wallet) };
-    }
+    // DB에 이미 등록된 셀러인지 확인
+    const existingSeller = await this.prisma.seller.findUnique({
+      where: { wallet },
+    });
 
+    if (existingSeller) {
+      return { tokenMint: existingSeller.tokenMint };
+    }
+    
+    // 토큰 발행
     const sellerPubkey = new PublicKey(wallet);
 
     const mint = await createMint(
@@ -73,15 +80,26 @@ export class SellerService {
       100_000_000
     );
 
-    this.sellerDB.set(wallet, mint.toBase58());
+    // DB에 저장
+    const newSeller = await this.prisma.seller.create({
+      data: {
+        wallet,
+        tokenMint: mint.toBase58(),
+      },
+    });
 
     return { tokenMint: mint.toBase58() };
   }
 
   async getSellerTokenMint(wallet: string): Promise<string> {
-    if (!this.sellerDB.has(wallet)) {
+    const seller = await this.prisma.seller.findUnique({
+      where: { wallet },
+    });
+
+    if (!seller) {
       throw new Error('Seller not found');
     }
-    return this.sellerDB.get(wallet);
+
+    return seller.tokenMint;
   }
 }
