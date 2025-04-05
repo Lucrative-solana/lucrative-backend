@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Catch, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import bs58 from 'bs58';
@@ -11,6 +11,7 @@ import { keypairIdentity } from '@metaplex-foundation/umi';
 import { PublicKey as Web3PublicKey } from '@solana/web3.js';
 import { publicKey as umiPublicKey } from '@metaplex-foundation/umi';
 import { mintV1, createAndMint, TokenStandard } from '@metaplex-foundation/mpl-token-metadata';
+import { ExceptionsHandler } from '@nestjs/core/exceptions/exceptions-handler';
 
 @Injectable()
 export class SellerService {
@@ -70,6 +71,7 @@ export class SellerService {
   }
 
   async getTokenAddress(wallet: string) {
+    console.log('Generating token mint for wallet:', wallet);
     const existingSeller = await this.prisma.seller.findUnique({
       where: { wallet },
     });
@@ -86,6 +88,7 @@ export class SellerService {
 
     const mint = generateSigner(this.umi);
 
+    console.log('Minting token with address:', mint.publicKey.toString());
     await createAndMint(this.umi, {
       mint,
       authority: this.umi.identity,
@@ -109,6 +112,7 @@ export class SellerService {
         tokenMint: tokenMint,
       },
     });
+    console.log('Seller created:', { wallet, tokenMint });
 
     return { tokenMint: tokenMint };
   }
@@ -136,14 +140,20 @@ export class SellerService {
 }
 
   async getSellerTokenMint(wallet: string): Promise<string> {
-    const seller = await this.prisma.seller.findUnique({
-      where: { wallet },
-    });
+    try {
+      console.log('Fetching token mint for wallet:', wallet);
+      const seller = await this.prisma.seller.findUnique({
+        where: { wallet },
+      });
 
-    if (!seller) {
-      throw new NotFoundException('Seller not found');
+      if (!seller) {
+        console.log('Seller not found for wallet:', wallet);
+        throw new NotFoundException('Seller not found');
+      }
+      return seller.tokenMint;
+    } catch (error) {
+      console.error('Error fetching token mint:', error);
+      throw new InternalServerErrorException('Error fetching token mint');
     }
-
-    return seller.tokenMint;
   }
 }

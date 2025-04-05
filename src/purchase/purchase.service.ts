@@ -78,7 +78,7 @@ export class PurchaseService {
       itemDescription,
     })
 
-    // 1. DB에서 item 정보 가져오기
+    // DB에서 item 정보 가져오기
     const item = await this.prisma.item.findUnique({
       where: { id: itemId },
     });
@@ -93,7 +93,7 @@ export class PurchaseService {
     // 1 SOL = 1e9 lamports
 
     const sellerWalletAddress = new PublicKey(item.walletAddress);
-    const itemPriceInSol = item.price;
+    const itemPriceInSol = item.price / 170000; // temp price
     const fullLamports = itemPriceInSol * 1e9;
 
     // 할인율 기반 유동성 비율 계산
@@ -138,6 +138,7 @@ export class PurchaseService {
     });
     
     // 판매자에게 유동성을 추가합니다.(할인된 금액만큼 유동성 추가)
+    console.log('Adding liquidity to seller:')
     const sellerTokenMint = (await this.sellerService.getSellerTokenMint(seller));
     console.log('Seller token mint:', sellerTokenMint);
     console.log('Liquidity amount:', liquidityLamports);
@@ -159,7 +160,7 @@ export class PurchaseService {
     const tokenMintTwo = address(sellerTokenMint);
     // const tokenMintTwo = address("BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k"); // devUSDC
     // const tokenMintTwo = address('43hotxWdt5efQi7aJwRVpexZBcHMKNaNn9Z4dG7QxJeT'); // token without pool creation
-    const initialPrice = 0.00000001;
+    const initialPrice = 1;
 
     // 기존 유동성 풀 정보 확인
     console.log('Fetching pool info...');
@@ -186,78 +187,17 @@ export class PurchaseService {
       console.log(`Pool Address: ${poolAddress}`);
       console.log(`Initialization Cost: ${initializationCost} lamports`);
 
-      // Create Transaction Message From Instructions
-      const latestBlockHash = await rpc.getLatestBlockhash().send();
-      const transactionMessage = await pipe(
-        createTransactionMessage({ version: 0}),
-        tx => setTransactionMessageFeePayer(wallet.address, tx),
-        tx => setTransactionMessageLifetimeUsingBlockhash(latestBlockHash.value, tx),
-        tx => appendTransactionMessageInstructions(instructions, tx),
-      );
-      console.log('Transaction message:', transactionMessage);
-
-      // Estimating Compute Unit Limit and Prioritization Fee
-      const getComputeUnitEstimateForTransactionMessage =
-      getComputeUnitEstimateForTransactionMessageFactory({
-        rpc
-      });
-      const computeUnitEstimate = await getComputeUnitEstimateForTransactionMessage(transactionMessage) + 100_000;
-      const medianPrioritizationFee = await rpc.getRecentPrioritizationFees()
-        .send()
-        .then(fees =>
-          fees
-            .map(fee => Number(fee.prioritizationFee))
-            .sort((a, b) => a - b)
-            [Math.floor(fees.length / 2)]
-        );
-      const transactionMessageWithComputeUnitInstructions = await prependTransactionMessageInstructions([
-        getSetComputeUnitLimitInstruction({ units: computeUnitEstimate }),
-        getSetComputeUnitPriceInstruction({ microLamports: medianPrioritizationFee })
-      ], transactionMessage);
-
-      // Sign and Submit Transaction
-      const signedTransaction = await signTransactionMessageWithSigners(transactionMessageWithComputeUnitInstructions)
-      const base64EncodedWireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-
-      const timeoutMs = 90000;
-      const startTime = Date.now();
-
-      // 트랜잭션은 딱 한 번만 전송
-      const signature = await rpc.sendTransaction(base64EncodedWireTransaction, {
-        maxRetries: 0n,
-        skipPreflight: true,
-        encoding: 'base64'
-      }).send();
-
-      while (Date.now() - startTime < timeoutMs) {
-        const statuses = await rpc.getSignatureStatuses([signature]).send();
-        const status = statuses.value[0];
-
-        // 상태 정보가 있으면 트랜잭션 성공/실패 여부 확인
-        if (status) {
-          if (!status.err) {
-            console.log(`Transaction confirmed: ${signature}`);
-            return;
-          } else {
-            console.error(`Transaction failed: ${status.err.toString()}`);
-            return;
-          }
-        }
-
-        // 아직 상태 정보가 없으면 1초 대기 후 재시도
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      // 타임아웃 경과 시 처리
-      console.error(`Transaction not confirmed within ${timeoutMs}ms: ${signature}`);
+      this.sendInstrctionsWithWallet(instructions, wallet);
+      console.log('Pool created:');
 
     };
 
-    // 2. 유동성 풀에 유동성 추가
+    // 유동성 풀에 자산 추가
     console.log('Adding liquidity...');
     const whirlpoolAddress = address(poolInfo.address);
 
     const param = { 
-      tokenA: BigInt(liquidityLamports) ** 9n, // 9 decimal
+      tokenA: BigInt(liquidityLamports),
       tokenB: BigInt(liquidityLamports),
     };
 
@@ -269,11 +209,14 @@ export class PurchaseService {
       wallet
     );
 
+    this.sendInstrctionsWithWallet(instructions, wallet);
+    console.log('Liquidity added:')
+
     console.log(`Quote token max B: ${quote.tokenMaxB}`);
     console.log(`Initialization cost: ${initializationCost}`);
     console.log(`Position mint: ${positionMint}`);
 
-    // 3. 유동성 풀에 추가된 토큰을 판매자에게 전송
+    // 유동성 풀에 추가된 토큰을 판매자에게 전송
 
     await this.prisma.purchase.create({
       data: {
@@ -309,5 +252,81 @@ export class PurchaseService {
       // payoutSig,
       // liquiditySig,
     };
+  }
+  private async sendInstrctionsWithWallet(instructions: any[], wallet: any) {
+    console.log('Sending instructions with wallet:', {
+      instructions,
+      walletAddress: wallet.address,
+    });
+    const devnetRpc = createSolanaRpc(devnet('https://api.devnet.solana.com'));
+    const rpc = devnetRpc; // Define rpc as the Solana RPC client
+    
+    // Create Transaction Message From Instructions
+    const latestBlockHash = await rpc.getLatestBlockhash().send();
+    const transactionMessage = await pipe(
+      createTransactionMessage({ version: 0}),
+      tx => setTransactionMessageFeePayer(wallet.address, tx),
+      tx => setTransactionMessageLifetimeUsingBlockhash(latestBlockHash.value, tx),
+      tx => appendTransactionMessageInstructions(instructions, tx),
+    );
+    console.log('Transaction message created:');
+
+    // Estimating Compute Unit Limit and Prioritization Fee
+    // const getComputeUnitEstimateForTransactionMessage =
+    // getComputeUnitEstimateForTransactionMessageFactory({
+    //   rpc
+    // });
+    // const computeUnitEstimate = await getComputeUnitEstimateForTransactionMessage(transactionMessage) + 100_000;
+    // const medianPrioritizationFee = await rpc.getRecentPrioritizationFees()
+    //   .send()
+    //   .then(fees =>
+    //     fees
+    //       .map(fee => Number(fee.prioritizationFee))
+    //       .sort((a, b) => a - b)
+    //       [Math.floor(fees.length / 2)]
+    //   );
+    const transactionMessageWithComputeUnitInstructions = await prependTransactionMessageInstructions([
+      // getSetComputeUnitLimitInstruction({ units: computeUnitEstimate }),
+      // getSetComputeUnitPriceInstruction({ microLamports: medianPrioritizationFee })
+      getSetComputeUnitLimitInstruction({ units: 800_000 }), 
+      getSetComputeUnitPriceInstruction({ microLamports: 1 }),
+    ], transactionMessage);
+
+    // Sign and Submit Transaction
+    const signedTransaction = await signTransactionMessageWithSigners(transactionMessageWithComputeUnitInstructions)
+    const base64EncodedWireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+
+    const timeoutMs = 90000;
+    const startTime = Date.now();
+
+    // 트랜잭션은 딱 한 번만 전송
+    console.log('Sending transaction:');
+    const signature = await rpc.sendTransaction(base64EncodedWireTransaction, {
+      maxRetries: 0n,
+      skipPreflight: true,
+      encoding: 'base64'
+    }).send();
+
+    while (Date.now() - startTime < timeoutMs) {
+      const statuses = await rpc.getSignatureStatuses([signature]).send();
+      const status = statuses.value[0];
+
+      // 상태 정보가 있으면 트랜잭션 성공/실패 여부 확인
+      if (status) {
+        if (!status.err) {
+          console.log(`Transaction confirmed: ${signature}`);
+          return;
+        } else {
+          console.error(`Transaction failed: ${status.err.toString()}`);
+          return;
+        }
+      }
+
+      // 아직 상태 정보가 없으면 1초 대기 후 재시도
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    // 타임아웃 경과 시 처리
+    console.error(`Transaction not confirmed within ${timeoutMs}ms: ${signature}`);
+
   }
 }
