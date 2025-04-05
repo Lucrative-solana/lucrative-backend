@@ -3,7 +3,7 @@ import { SellerService } from './seller.service';
 import { SellerController } from './seller.controller';
 
 @Module({
-  controllers: [SellerController], // SellerController 추가
+  controllers: [SellerController],
   providers: [SellerService],
   exports: [SellerService],
 })

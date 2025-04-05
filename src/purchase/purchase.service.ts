@@ -76,16 +76,16 @@ export class PurchaseService {
     // });
     // const liquiditySig = await position.buildAndExecute();
 
-    await this.prisma.purchase.create({
-      data: {
-        buyer,
-        seller,
-        amount: amountInSol,
-        sellerTokenMint,
-        payoutSig,
-        // liquiditySig,
-      },
-    });
+    // await this.prisma({
+    //   data: {
+    //     buyer,
+    //     seller,
+    //     amount: amountInSol,
+    //     sellerTokenMint,
+    //     payoutSig,
+    //     // liquiditySig,
+    //   },
+    // });
 
     return {
       status: 'success',
