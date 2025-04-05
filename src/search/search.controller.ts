@@ -1,5 +1,5 @@
 import { SearchService } from './search.service';
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
 
 @Controller('search')
 export class SearchController {
@@ -16,11 +16,18 @@ export class SearchController {
     return 'Hello Search!';
   }
 
-  @Get('/all')
+  @Get('/allitem')
   async getAll() {
-    return {
-      message: 'Hello Search!',
-    };
+    return await this.searchService.search_all_item();
+  }
+
+  @Get('/item-by-id')
+  async getItemById(@Query('id') id: string) {
+    console.log('Received item by ID request:', id);
+    if (!id) {
+      throw new BadRequestException('ID is required');
+    }
+    return await this.searchService.search_item_by_id(id);
   }
 
   @Post('/my-register-item')
