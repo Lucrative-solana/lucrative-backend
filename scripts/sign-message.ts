@@ -6,7 +6,7 @@ import * as nacl from 'tweetnacl';
 import bs58 from 'bs58';
 
 // 1. 비밀키 불러오기
-const rawKey = process.env.SOLANA_BUYER_PRIVATE_KEY;
+const rawKey = process.env.SOLANA_PAYER_PRIVATE_KEY;
 
 if (!rawKey) {
   console.error('❌ .env에 PRIVATE_KEY가 설정되어 있지 않습니다.');

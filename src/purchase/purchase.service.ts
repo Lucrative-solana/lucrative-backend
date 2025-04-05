@@ -6,8 +6,6 @@ import {
   SystemProgram, 
   Transaction, 
   sendAndConfirmTransaction,
-  TransactionInstruction,
-  AccountMeta
 } from '@solana/web3.js';
 import { SellerService } from 'src/seller/seller.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -224,32 +222,33 @@ export class PurchaseService {
       const timeoutMs = 90000;
       const startTime = Date.now();
 
+      // 트랜잭션은 딱 한 번만 전송
+      const signature = await rpc.sendTransaction(base64EncodedWireTransaction, {
+        maxRetries: 0n,
+        skipPreflight: true,
+        encoding: 'base64'
+      }).send();
+
       while (Date.now() - startTime < timeoutMs) {
-        const transactionStartTime = Date.now();
-
-        const signature = await rpc.sendTransaction(base64EncodedWireTransaction, {
-          maxRetries: 0n,
-          skipPreflight: true,
-          encoding: 'base64'
-        }).send();
-
         const statuses = await rpc.getSignatureStatuses([signature]).send();
-        if (statuses.value[0]) {
-          if (!statuses.value[0].err) {
+        const status = statuses.value[0];
+
+        // 상태 정보가 있으면 트랜잭션 성공/실패 여부 확인
+        if (status) {
+          if (!status.err) {
             console.log(`Transaction confirmed: ${signature}`);
-            break;
+            return;
           } else {
-            console.error(`Transaction failed: ${statuses.value[0].err.toString()}`);
-            break;
+            console.error(`Transaction failed: ${status.err.toString()}`);
+            return;
           }
         }
 
-        const elapsedTime = Date.now() - transactionStartTime;
-        const remainingTime = Math.max(0, 1000 - elapsedTime);
-        if (remainingTime > 0) {
-          await new Promise(resolve => setTimeout(resolve, remainingTime));
-        }
+        // 아직 상태 정보가 없으면 1초 대기 후 재시도
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
+      // 타임아웃 경과 시 처리
+      console.error(`Transaction not confirmed within ${timeoutMs}ms: ${signature}`);
 
     };
 
