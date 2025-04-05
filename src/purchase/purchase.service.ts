@@ -42,6 +42,7 @@ import {
 import {
   createTransferInstruction,
   getOrCreateAssociatedTokenAccount,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 
 @Injectable()
@@ -222,49 +223,70 @@ export class PurchaseService {
 
     // 유동성 풀에 추가된 토큰을 판매자에게 전송
     console.log('Transferring token to seller:');
-    const fromWallet = this.payer.publicKey;
-    const toWallet = sellerWalletAddress;
 
-    const mint = new PublicKey(positionMint);
+    // 지갑 및 토큰 정보 설정
+    const payer = this.payer /* 지불자 키페어 */;
 
-    const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
-      this.connection,
-      this.payer,
-      mint,
-      fromWallet
-    );
-
-    const toTokenAccount = await getOrCreateAssociatedTokenAccount(
-      this.connection,
-      this.payer,
-      mint,
-      toWallet
-    );
+    (async () => {
+      console.log('판매자에게 토큰 전송을 시작합니다.');
     
-    const amount = 1;
+      const fromWallet = payer.publicKey;
+      const toWallet = new PublicKey(sellerWalletAddress);
+      const mint = new PublicKey(positionMint);
 
-    // 전송 인스트럭션 생성
-    const transferInstruction = createTransferInstruction(
-      fromTokenAccount.address,
-      toTokenAccount.address,
-      fromWallet,
-      amount
-    );
-    console.log('Transfer instruction created:', {
-      from: fromTokenAccount.address.toBase58(),
-      to: toTokenAccount.address.toBase58(),
-      amount,
-    });
+      console.log('보내는 지갑:', fromWallet.toBase58());
+      const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        payer,
+        mint,
+        fromWallet,
+        false,
+        undefined,
+        undefined,
+        TOKEN_2022_PROGRAM_ID // Token-2022 프로그램 ID 지정
+      );
+    
+      console.log('받는 지갑:', toWallet.toBase58());
+      const toTokenAccount = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        payer,
+        mint,
+        toWallet,
+        false,
+        undefined,
+        undefined,
+        TOKEN_2022_PROGRAM_ID // Token-2022 프로그램 ID 지정
+      );
+    
+      const amount = 1;
+    
+      // 전송 인스트럭션 생성
+      const transferInstruction = createTransferInstruction(
+        fromTokenAccount.address,
+        toTokenAccount.address,
+        fromWallet,
+        amount,
+        [],
+        TOKEN_2022_PROGRAM_ID // Token-2022 프로그램 ID 지정
+      );
+    
+      console.log('전송 인스트럭션 생성 완료:', {
+        from: fromTokenAccount.address.toBase58(),
+        to: toTokenAccount.address.toBase58(),
+        amount,
+      });
+    
+      // 트랜잭션 생성 및 서명
+      const transaction = new Transaction().add(transferInstruction);
+      await sendAndConfirmTransaction(this.connection, transaction, [payer]);
+    
+      console.log('토큰이 판매자에게 성공적으로 전송되었습니다:', {
+        from: fromWallet.toBase58(),
+        to: toWallet.toBase58(),
+        amount,
+      });
+    })();
 
-    // 트랜잭션 생성 및 서명
-    const transaction = new Transaction().add(transferInstruction);
-    await sendAndConfirmTransaction(this.connection, transaction, [this.payer]);
-
-    console.log('Token transferred to seller:', {
-      from: fromWallet.toBase58(),
-      to: toWallet.toBase58(),
-      amount,
-    });
     // 전송 작업 완료 후 DB에 기록
     await this.prisma.purchase.create({
       data: {
