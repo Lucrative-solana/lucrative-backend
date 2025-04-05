@@ -70,8 +70,9 @@ export class SellerService {
     return items;
   }
 
-  async getTokenAddress(wallet: string) {
-    console.log('Generating token mint for wallet:', wallet);
+  async getTokenAddress(body: any) {
+    console.log('Generating token mint for wallet:', body.walletAddress);
+    const wallet = body.walletAddress;
     const existingSeller = await this.prisma.seller.findUnique({
       where: { wallet },
     });

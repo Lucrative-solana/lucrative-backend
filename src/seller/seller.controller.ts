@@ -28,7 +28,6 @@ export class SellerController {
   @Post('token/address')
   async login(@Body() body: { wallet: string;}) {
     console.log('Received login request:', body);
-    const { wallet } = body;
-    return this.sellerService.getTokenAddress(wallet);
+    return this.sellerService.getTokenAddress(body);
   }
 }
