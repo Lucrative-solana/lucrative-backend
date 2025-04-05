@@ -26,17 +26,9 @@ export class SellerController {
   }
 
   @Post('token/address')
-  async login(@Body() body: { wallet: string; message: string; signature: string }) {
-    const { wallet, message, signature } = body;
-    if (!wallet || !message || !signature) {
-      throw new BadRequestException('Missing wallet, message, or signature');
-    }
-  
-    const valid = this.sellerService.verifySignature(wallet, message, signature);
-    if (!valid) {
-      throw new BadRequestException('Invalid signature');
-    }
-  
-      return this.sellerService.getTokenAddress(wallet);
-    }
+  async login(@Body() body: { wallet: string;}) {
+    console.log('Received login request:', body);
+    const { wallet } = body;
+    return this.sellerService.getTokenAddress(wallet);
   }
+}

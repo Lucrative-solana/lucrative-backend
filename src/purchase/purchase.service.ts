@@ -39,6 +39,10 @@ import {
   getSetComputeUnitLimitInstruction,
   getSetComputeUnitPriceInstruction
 } from '@solana-program/compute-budget';
+import {
+  createTransferInstruction,
+  getOrCreateAssociatedTokenAccount,
+} from "@solana/spl-token";
 
 @Injectable()
 export class PurchaseService {
@@ -187,7 +191,7 @@ export class PurchaseService {
       console.log(`Pool Address: ${poolAddress}`);
       console.log(`Initialization Cost: ${initializationCost} lamports`);
 
-      this.sendInstrctionsWithWallet(instructions, wallet);
+      await this.sendInstrctionsWithWallet(instructions, wallet);
       console.log('Pool created:');
 
     };
@@ -209,7 +213,7 @@ export class PurchaseService {
       wallet
     );
 
-    this.sendInstrctionsWithWallet(instructions, wallet);
+    await this.sendInstrctionsWithWallet(instructions, wallet);
     console.log('Liquidity added:')
 
     console.log(`Quote token max B: ${quote.tokenMaxB}`);
@@ -217,7 +221,51 @@ export class PurchaseService {
     console.log(`Position mint: ${positionMint}`);
 
     // 유동성 풀에 추가된 토큰을 판매자에게 전송
+    console.log('Transferring token to seller:');
+    const fromWallet = this.payer.publicKey;
+    const toWallet = sellerWalletAddress;
 
+    const mint = new PublicKey(positionMint);
+
+    const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
+      this.connection,
+      this.payer,
+      mint,
+      fromWallet
+    );
+
+    const toTokenAccount = await getOrCreateAssociatedTokenAccount(
+      this.connection,
+      this.payer,
+      mint,
+      toWallet
+    );
+    
+    const amount = 1;
+
+    // 전송 인스트럭션 생성
+    const transferInstruction = createTransferInstruction(
+      fromTokenAccount.address,
+      toTokenAccount.address,
+      fromWallet,
+      amount
+    );
+    console.log('Transfer instruction created:', {
+      from: fromTokenAccount.address.toBase58(),
+      to: toTokenAccount.address.toBase58(),
+      amount,
+    });
+
+    // 트랜잭션 생성 및 서명
+    const transaction = new Transaction().add(transferInstruction);
+    await sendAndConfirmTransaction(this.connection, transaction, [this.payer]);
+
+    console.log('Token transferred to seller:', {
+      from: fromWallet.toBase58(),
+      to: toWallet.toBase58(),
+      amount,
+    });
+    // 전송 작업 완료 후 DB에 기록
     await this.prisma.purchase.create({
       data: {
         buyer,
